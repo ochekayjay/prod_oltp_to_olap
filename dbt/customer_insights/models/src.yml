@@ -1,0 +1,6 @@
+version: 2
+sources:
+  - name: main
+    schema: public
+    tables:
+      - name: local_oltp_raw_data
