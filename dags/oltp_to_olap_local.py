@@ -57,81 +57,28 @@ execution_config = ExecutionConfig(
     execution_mode= ExecutionMode.LOCAL
 )
 
+      
+
+@task 
+def consume_from_cloud_sql(ti):
+    hook = PostgresHook(postgres_conn_id="postgres_default")
+    conn = hook.get_conn()
+    cur = conn.cursor()
+
+    cur.execute("""
+                SELECT * FROM oltp_to_olap_raw_data
+                """)
+    
+
+    tabColList = [element[0] for element in cur.description]
+    queryData = cur.fetchall()
+    tempObj = {'data':queryData,'columns':tabColList}
+    #consumedDf = pd.DataFrame(queryData,columns=tabColList)
+    ti.xcom_push(key="my_data",value=tempObj)
 
 
-
-def process_message_batch(messages):
-    """
-    Example callback to process a batch of Kafka messages.
-    """
-    cleanedVal = []
-    for msg in messages:
-        if msg is None:
-            continue
-        if msg.error():
-            print(f"Error: {msg.error()}")
-        else:
-            #print(f"Consumed from {msg.topic()} [{msg.partition()}] @ {msg.offset()}: {msg.value().decode('utf-8')}")
-            cleanedVal.append(json.loads(msg.value().decode('utf-8')))
-    #print(cleanedVal)
-    log.info("Consumed message: %s", cleanedVal)
-    return cleanedVal
-
-
-@task
-def consume_messages(ti):
-    # Consumer configuration
-    conf = {
-        'bootstrap.servers': 'kafka1:9092,kafka2:9093,kafka3:9094',
-        'group.id': 'my_consumer_group',         # Consumer group id
-        'auto.offset.reset': 'earliest'          # Where to start if no offset is committed
-    }
-
-    consumer = Consumer(conf)
-
-    topics = ["topic4", "topic5"]
-    consumer.subscribe(topics)
-
-    poll_timeout = 10   # seconds
-    max_messages = 50
-    max_batch_size = 10
-
-    messages = []
-    refinedVal = []
-
-    try:
-        while len(messages) < max_messages:
-            msg = consumer.poll(poll_timeout)
-
-            if msg is None:
-                continue
-            if msg.error():
-                if msg.error().code() == KafkaError._PARTITION_EOF:
-                    continue  # End of partition event
-                else:
-                    raise KafkaException(msg.error())
-
-            messages.append(msg)
-
-            # Process when batch size is reached
-            if len(messages) == max_messages:
-                refinedVal = process_message_batch(messages)
-                ti.xcom_push(key="my_data",value=refinedVal)
-               
-            else:
-                print(len(messages))
-
-            #
-
-        # process any leftover messages
-        if messages:
-            refinedVal = process_message_batch(messages)
-            return refinedVal
-
-    finally:
-        consumer.close()
-        
-
+    cur.close()
+    conn.close()
 
 
 
@@ -140,15 +87,17 @@ def insert_into_postgres(ti):
     
     # ✅ pull contentList from previous task
     #contentList = ti.xcom_pull(task_ids="consume_events")
-    contentList = ti.xcom_pull(task_ids='consume_messages', key='return_value')
-    
+    contentList = ti.xcom_pull(task_ids='consume_from_cloud_sql', key='my_data')
+    queryData = contentList['data']
+    tabColList = contentList['columns']
+    consumedDf = pd.DataFrame(queryData,columns=tabColList)
     log.info("postgres-bound messages: %s", contentList)
     hook = PostgresHook(postgres_conn_id="postgres_default")
     conn = hook.get_conn()
     cur = conn.cursor()
 
     insert_query = """
-        INSERT INTO local_oltp_raw_data (
+        INSERT INTO staging_prod_raw_data (
             brand, nameOfClient, clientLocation, paymentMethod,
             dayTime, item, count, cost, customerFeedBack, unique_row_id
         )
@@ -166,24 +115,24 @@ def insert_into_postgres(ti):
         )
     """
 
-    for row in contentList:
+    for _,rows in consumedDf.iterrows():
         cur.execute(
             insert_query,
             (
-                row.get('brand'),
-                row.get('nameOfClient'),
-                row.get('clientLocation'),
-                row.get('paymentMethod'),
-                row.get('dayTime'),
-                row.get('item'),
-                row.get('count'),
-                row.get('cost'),
-                row.get('customerFeedBack'),
+                rows['brand'],
+                rows['nameOfClient'],
+                rows['clientLocation'],
+                rows['paymentMethod'],
+                rows['dayTime'],
+                rows['item'],
+                rows['count'],
+                rows['cost'],
+                rows['customerFeedBack'],
                 # fields used for MD5 uniqueness
-                row.get('brand'),
-                row.get('nameOfClient'),
-                row.get('dayTime'),
-                row.get('cost')
+                rows['brand'],
+                rows['nameOfClient'],
+                rows['dayTime'],
+                rows['cost']
             )
         )
 
@@ -201,7 +150,7 @@ def purge_staging_table():
     cur = conn.cursor()
 
     cur.execute("""
-                DROP TABLE local_oltp_raw_data
+                DROP TABLE staging_prod_raw_data
                 """)
     conn.commit()
     cur.close()
@@ -237,7 +186,7 @@ def local_oltp_to_olap_dag_call():
         task_id="create_table",
         conn_id="postgres_default",    # defined in Airflow Connections
         sql= """
-                CREATE TABLE IF NOT EXISTS local_oltp_raw_data(
+                CREATE TABLE IF NOT EXISTS staging_prod_raw_data(
                     brand TEXT,
                     nameOfClient TEXT,
                     clientLocation TEXT,
@@ -257,7 +206,7 @@ def local_oltp_to_olap_dag_call():
 
     create_data_wh_table_task = BigQueryCreateTableOperator(
         task_id="create_data_wh_table_task",
-        dataset_id="bq_airflow_dbt_db",
+        dataset_id="prod_bq_olap_set",
         table_id="client_daily_aggregation",
         gcp_conn_id='google_cloud_default',
         table_resource={
@@ -288,7 +237,7 @@ def local_oltp_to_olap_dag_call():
 
     create_client_timerank_table = BigQueryCreateTableOperator(
         task_id="create_client_agg_table_task",
-        dataset_id="bq_airflow_dbt_db",
+        dataset_id="prod_bq_olap_set",
         table_id="client_time_ranking",
         gcp_conn_id='google_cloud_default',
         table_resource={
@@ -341,7 +290,7 @@ def local_oltp_to_olap_dag_call():
                     cost,
                     customerFeedBack,
                     unique_row_id
-                    FROM local_oltp_raw_data 
+                    FROM staging_prod_raw_data 
                     """)
         tabColList = [element[0] for element in cur.description]
         queryData = cur.fetchall()
@@ -359,7 +308,7 @@ def local_oltp_to_olap_dag_call():
         #bq_hook = BigQueryHook(gcp_conn_id="cloud-storage-default", use_legacy_sql=False)
 
 
-        table_full_id = "airflow-soln-project.bq_airflow_dbt_db.client_daily_aggregation"
+        table_full_id = "airflow-soln-project.prod_bq_olap_set.client_daily_aggregation"
 
         job_config = bigquery.LoadJobConfig(
             # Optional: Specify schema if you want to enforce it, otherwise BigQuery infers
@@ -417,7 +366,7 @@ def local_oltp_to_olap_dag_call():
 
         #bq_hook = BigQueryHook(gcp_conn_id="cloud-storage-default", use_legacy_sql=False)
 
-        table_full_id = "airflow-soln-project.bq_airflow_dbt_db.client_time_ranking"
+        table_full_id = "airflow-soln-project.prod_bq_olap_set.client_time_ranking"
 
         job_config = bigquery.LoadJobConfig(
             schema=[
@@ -449,7 +398,7 @@ def local_oltp_to_olap_dag_call():
     
 
     insert_into_pg = insert_into_postgres()
-    consume_from_kafka = consume_messages()
+    consume_from_cloud_sql = consume_from_cloud_sql()
     insert_into_central_bq = insert_into_central_data_warehouse()
     insert_into_rank_table = insert_into_client_rank_table()
     purge_table = purge_staging_table()
@@ -459,7 +408,7 @@ def local_oltp_to_olap_dag_call():
 
     
 
-    consume_from_kafka>>create_postgres_table_task>>create_data_wh_table_task>>create_client_timerank_table>>insert_into_pg>>dbt_transformations>>insert_into_central_bq>>insert_into_rank_table>>purge_table>>purge_stratifying_table
+    consume_from_cloud_sql>>create_postgres_table_task>>create_data_wh_table_task>>create_client_timerank_table>>insert_into_pg>>dbt_transformations>>insert_into_central_bq>>insert_into_rank_table>>purge_table>>purge_stratifying_table
       
      
  
@@ -491,4 +440,12 @@ query_table = SQLExecuteQueryOperator(
             default_args={"retries": 2},
             render_config=render_config,
         )
+"""
+
+"""
+CLOUD SQL
+Password - %10LSomp\`6b,0v<
+User - postgres
+Database - postgres
+Host - 34.162.96.20
 """

@@ -3,9 +3,11 @@ customer_insights:
   target: prod
   outputs:
     prod:
-      type: bigquery
-      method: service-account
-      keyfile: "{{ env_var('DBT_KEYFILE') }}"
-      project: "{{ env_var('DBT_PROJECT') }}"
-      dataset: "{{ env_var('DBT_DATASET') }}"
-      location: EU
+      dbname: postgres
+      host: 34.162.96.20
+      pass: deebeetee
+      port: 5432
+      schema: airflowDbtSchema
+      threads: 1
+      type: postgres
+      user: postgres
