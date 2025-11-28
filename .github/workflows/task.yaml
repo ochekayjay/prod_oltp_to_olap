@@ -1,4 +1,4 @@
-name: Sync DAGs to GCS
+name: Sync repo to GCS
 
 on:
   push:
@@ -6,6 +6,10 @@ on:
     paths:
       - 'dags/**'
       - 'plugins/**'
+      - 'dbt/**'
+      - 'plug/**'
+      - 'logs/**'
+
 
 jobs:
   deploy:
