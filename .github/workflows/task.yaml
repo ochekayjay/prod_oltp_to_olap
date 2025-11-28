@@ -23,15 +23,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
+      # Setup gcloud CLI
+      - uses: google-github-actions/setup-gcloud@v0
         with:
-          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
-          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
-
-      - name: Set up gcloud CLI and gsutil
-        # Use this action to install/configure the tools correctly
-        uses: google-github-actions/setup-gcloud@v2
+          service_account_email: ${{ secrets.GCP_SA_EMAIL }}
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          project_id: airflow-soln-project
 
       - name: Sync DAGs to GCS
         run: |
