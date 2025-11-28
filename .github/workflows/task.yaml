@@ -32,7 +32,7 @@ jobs:
       - name: Install gsutil
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y google-cloud-sdk
+          sudo apt-get install -y google-cloud-cli
 
       - name: Sync DAGs to GCS
         run: |
