@@ -1,0 +1,39 @@
+name: Sync DAGs to GCS
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'dags/**'
+      - 'plugins/**'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Install gsutil
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y google-cloud-sdk
+
+      - name: Sync DAGs to GCS
+        run: |
+          gsutil -m rsync -r ./dags gs://prod_oltp_to_olap_test/dags
+          gsutil -m rsync -r ./plugins gs://prod_oltp_to_olap_test/plugins
+          gsutil -m rsync -r ./dbt gs://prod_oltp_to_olap_test/dbt
+          gsutil -m rsync -r ./plugs gs://prod_oltp_to_olap_test/plugs
+          gsutil -m rsync -r ./plugins gs://prod_oltp_to_olap_test/plugins
