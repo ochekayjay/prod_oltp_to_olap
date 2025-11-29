@@ -31,7 +31,7 @@ def test_consumption():
         print("I am not here")
         print("I am here")
         print("I am still very hungry")
-        print("I am still very hungry")
+        print("I am stvery hungry")
         print("I am excited")
 
     printedVal = print_random()\
