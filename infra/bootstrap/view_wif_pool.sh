@@ -7,10 +7,12 @@
 #steps
 # gcloud auth login
 # gcloud config set project my-gcp-project-id
-# bash ...../create_wif_pool.sh
+# bash ...../view_wif_pool.sh
 
 
-gcloud iam workload-identity-pools create "oltp-olap-main-pool" \
+# TODO: replace ${PROJECT_ID} with your value below.
+
+gcloud iam workload-identity-pools describe "oltp-olap-main-pool" \
   --project="airflow-soln-project" \
   --location="global" \
-  --display-name="GitHub Actions Pool"
+  --format="value(name)"
