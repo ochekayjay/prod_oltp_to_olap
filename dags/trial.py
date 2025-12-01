@@ -29,7 +29,7 @@ def test_consumption():
     @task
     def print_random():
         print("I would not be here")
-        print("I am still very hungry")
+        print("I am still uuery hungry")
         print("I am stvery hungry")
         print("I am excited")
 
